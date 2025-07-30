@@ -1,0 +1,8 @@
+ 
+docker build -t podcast-generator .
+ 
+ 
+ docker run --gpus all \
+   -v $(pwd):/app \
+   podcast-generator \
+   python main.py --input /app/test_doc.pdf --output /app/output_podcast.wav --model 2
