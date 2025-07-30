@@ -1,2 +1,2 @@
 # Podcast-Pipeline
-Sample podcast pipeline
+Sample podcast pipeline for Chatterbox & Kokoro TTS
