@@ -50,7 +50,7 @@ def main():
     parser = argparse.ArgumentParser(description='Generate a podcast from a document')
     parser.add_argument('--input', type=str, required=True, help='Path to input document')
     parser.add_argument('--output', type=str, default='output_podcast.wav', help='Path to output audio file')
-    parser.add_argument('--model', type=int, choices=[1, 2], default=1, help='Select TTS model: 1 for Kokoro, 2 for SageMaker')
+    parser.add_argument('--model', type=int, choices=[1, 2, 3], default=1, help='Select TTS model: 1 for Kokoro, 2 for SageMaker, 3 for Kyutai')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode for more verbose output')
     args = parser.parse_args()
     
@@ -67,7 +67,14 @@ def main():
                 document = f.read()
         
         podcast_gen = PodcastGenerator()
-        model_name = 'kokoro' if args.model == 1 else 'sagemaker'
+
+        if args.model == 1:
+            model_name = 'kokoro'
+        elif args.model == 2:
+            model_name = 'chatterbox'
+        else:
+            model_name = 'kyutai'
+
         print(f"Using model: {model_name}")
 
         output_file = podcast_gen.generate_podcast(document, args.output, model_name=model_name)

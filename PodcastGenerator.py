@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Tuple
 from pydub import AudioSegment
 from kokoro import KPipeline
-from sagemaker_client import SageMakerClient, SageMakerEmbeddingClient, SageMakerTTSClient
+from sagemaker_client import SageMakerClient, SageMakerEmbeddingClient, SageMakerTTSClient, ChatterboxTTSClient, KyutaiTTSClient
 from rag_service import RAGService
 
 load_dotenv()
@@ -22,7 +22,8 @@ class PodcastGenerator:
         # Initialize SageMaker client for script generation
         self.llm_client = SageMakerClient(endpoint_name=llm_endpoint) if llm_endpoint else SageMakerClient()
         self.embedding_client = SageMakerEmbeddingClient()
-        self.sagemaker_tts_client = SageMakerTTSClient()
+        self.chatterbox_tts_client = ChatterboxTTSClient()
+        self.kyutai_tts_client = KyutaiTTSClient()
         self.num_voices = int(os.environ['TTS_NUM_VOICES'])
 
         # Initialize Kokoro TTS pipeline, code a for American English
@@ -162,6 +163,7 @@ class PodcastGenerator:
         
         return remapped_chunks
     
+    # Audio generation for Kokoro
     def generate_audio_for_chunk(self, chunk: List[Tuple[int, str]]) -> np.ndarray:
         """Generate audio for a chunk of utterances and return as a single array."""
         all_audio_segments = []
@@ -200,9 +202,10 @@ class PodcastGenerator:
         
         return np.array([], dtype=np.float32)
     
-    def generate_audio_for_chunk_sagemaker(self, chunk: list) -> np.ndarray:
-        if not self.sagemaker_tts_client:
-            raise ValueError("SageMaker TTS client not initialized")
+
+    def generate_audio_for_chunk_chatterbox(self, chunk: list) -> np.ndarray:
+        if not self.chatterbox_tts_client:
+            raise ValueError("Chatterbox TTS client not initialized")
             
         all_audio_segments = []
         target_sample_rate = 22050
@@ -212,7 +215,7 @@ class PodcastGenerator:
             
             try:
                 # Get binary WAV data
-                wav_data = self.sagemaker_tts_client.invoke(
+                wav_data = self.chatterbox_tts_client.invoke(
                     text=text, 
                     voice_key=speaker
                 )
@@ -254,6 +257,52 @@ class PodcastGenerator:
             return np.concatenate(all_audio_segments)
         return np.array([], dtype=np.float32)
 
+    def generate_audio_for_chunk_kyutai(self, chunk: list) -> np.ndarray:
+        if not self.kyutai_tts_client:
+            raise ValueError("Kyutai TTS client not initialized")
+            
+        all_audio_segments = []
+        target_sample_rate = 24000  # Kyutai uses 24kHz sample rate
+        
+        for speaker, text in chunk:
+            print(f"Generating audio for Speaker {speaker} using Kyutai")
+            
+            try:
+                # Get binary WAV data
+                wav_data = self.kyutai_tts_client.invoke(
+                    text=text, 
+                    voice_key=speaker
+                )
+                
+                if wav_data:
+                    # Read audio directly from bytes
+                    with BytesIO(wav_data) as audio_buffer:
+                        audio_array, actual_sample_rate = sf.read(
+                            audio_buffer,
+                            dtype='float32'
+                        )
+                    
+                    print(f"✓ Audio received: {len(audio_array)} samples @ {actual_sample_rate}Hz")
+                                      
+                    # Add to segments
+                    all_audio_segments.append(audio_array)
+                    
+                    # Add 300ms pause between utterances
+                    pause = np.zeros(int(0.3 * target_sample_rate), dtype=np.float32)
+                    all_audio_segments.append(pause)
+                else:
+                    print(f"✗ Empty response for speaker {speaker}")
+                    
+            except Exception as e:
+                print(f"Error processing speaker {speaker}: {e}")
+                continue
+        
+        # Combine all segments
+        if all_audio_segments:
+            return np.concatenate(all_audio_segments)
+        return np.array([], dtype=np.float32)
+
+
     def generate_podcast(self, document: str, output_path: str, model_name: str) -> str:
         """Generate a complete podcast from a document."""
         # Create outputs directory
@@ -281,17 +330,20 @@ class PodcastGenerator:
         print(f"Generating audio for {len(chunks)} chunks...")
         all_chunk_files = []
 
-        sample_rate = 24000 if model_name == "kokoro" else 22050
-        
+        sample_rate = 22050 if model_name == "chatterbox" else 24000
+
         for i, chunk in enumerate(chunks):
             print(f"\nProcessing chunk {i+1}/{len(chunks)}")
             
             if(model_name == "kokoro"):
                 # Generate audio for this chunk
                 chunk_audio = self.generate_audio_for_chunk(chunk)
-            elif(model_name == "sagemaker"):
-                # Generate audio for this chunk using SageMaker
-                chunk_audio = self.generate_audio_for_chunk_sagemaker(chunk)
+            elif(model_name == "chatterbox"):
+                # Generate audio for this chunk using Chatterbox TTS
+                chunk_audio = self.generate_audio_for_chunk_chatterbox(chunk)
+            elif(model_name == "kyutai"):
+                # Generate audio for this chunk using Kyutai TTS
+                chunk_audio = self.generate_audio_for_chunk_kyutai(chunk)
             else:
                 raise ValueError(f"Unsupported model name: {model_name}")
             
